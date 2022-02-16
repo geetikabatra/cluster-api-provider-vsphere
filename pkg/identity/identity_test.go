@@ -27,7 +27,7 @@ import (
 )
 
 // nolint:goconst
-var _ = Describe("GetCredentials", func() {
+var _ = Describe("Identity Test", func() {
 	var (
 		ns      *corev1.Namespace
 		cluster *infrav1.VSphereCluster
@@ -200,6 +200,27 @@ var _ = Describe("GetCredentials", func() {
 			_, err := GetCredentials(ctx, k8sclient, cluster, manager.DefaultPodNamespace)
 			Expect(err).To(HaveOccurred())
 		})
+	})
+	Context("If a secret Identity", func() {
+		It("should contain secretIdentity in clusterspec", func() {
+			credentialSecret := createSecret(cluster.Namespace)
+			cluster.Spec = infrav1.VSphereClusterSpec{
+				IdentityRef: &infrav1.VSphereIdentityReference{
+					Kind: infrav1.SecretKind,
+					Name: credentialSecret.Name,
+				},
+			}
+			Expect(k8sclient.Update(ctx, cluster)).To(Succeed())
+			IsSecret := IsSecretIdentity(cluster)
+			Expect(IsSecret).To(Equal(true))
+		})
+		It("should not contain secretIdentity in clusterspec", func() {
+			cluster.Spec = infrav1.VSphereClusterSpec{}
+			Expect(k8sclient.Update(ctx, cluster)).To(Succeed())
+			IsSecret := IsSecretIdentity(cluster)
+			Expect(IsSecret).To(Equal(false))
+		})
+
 	})
 })
 

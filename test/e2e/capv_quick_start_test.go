@@ -23,7 +23,7 @@ import (
 	capi_e2e "sigs.k8s.io/cluster-api/test/e2e"
 )
 
-var _ = Describe("Cluster Creation using Cluster API quick-start test [PR-Blocking]", func() {
+var _ = FDescribe("Cluster Creation using Cluster API quick-start test [PR-Blocking]", func() {
 
 	Byf("Creating single-node control plane with one worker node")
 	capi_e2e.QuickStartSpec(context.TODO(), func() capi_e2e.QuickStartSpecInput {

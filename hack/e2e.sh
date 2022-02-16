@@ -101,6 +101,8 @@ login
 E2E_IMAGE_SHA=$(docker inspect --format='{{index .Id}}' gcr.io/k8s-staging-cluster-api/capv-manager:e2e)
 export E2E_IMAGE_SHA
 gsutil cp "$ARTIFACTS"/tempContainers/image.tar gs://capv-ci/"$E2E_IMAGE_SHA"
+#gsutil ls gs://capv-ci/
+#We look for latest e2e images  and use that SHA in the test locally
 
 # Run e2e tests
 make e2e
