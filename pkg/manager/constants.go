@@ -23,6 +23,11 @@ const (
 
 	// DefaultWebhookServiceContainerPort is the default value for the eponymous
 	// manager option.
+	// epnymous means named after the manager option of default webhooks servcie
+	// container port
+	//Eponymous means soething named after something else eg
+	//achilles is the eponym of achilles tendon
+
 	DefaultWebhookServiceContainerPort = 0
 
 	// DefaultSyncPeriod is the default value for the eponymous

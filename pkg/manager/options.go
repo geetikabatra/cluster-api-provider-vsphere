@@ -21,8 +21,16 @@ import (
 	"strings"
 	"time"
 
+	//****** read about apimachinery run timex
 	"k8s.io/apimachinery/pkg/runtime"
+
+	// what is the diff between clinet-go/kubernetes and
+	//client-go rest
 	"k8s.io/client-go/rest"
+
+	// ** see later where is this ues and update the comment here
+	// This is used on 118 to extract the kubeconfig
+	// a function Get configOrDie is used
 	"sigs.k8s.io/controller-runtime/pkg/client/config"
 	ctrllog "sigs.k8s.io/controller-runtime/pkg/log"
 	ctrlmgr "sigs.k8s.io/controller-runtime/pkg/manager"
@@ -41,6 +49,7 @@ type Options struct {
 	ctrlmgr.Options
 
 	// EnableKeepAlive is a session feature to enable keep alive handler
+	//*** what do we mean by enable keep alive handler here
 	// for better load management on vSphere api server
 	EnableKeepAlive bool
 
@@ -71,6 +80,8 @@ type Options struct {
 
 	// KeepAliveDuration is the idle time interval in between send() requests
 	// in keepalive handler
+	// **********where is the send requiest coming from?
+	//***** find more about keep alive handler
 	KeepAliveDuration time.Duration
 
 	// CredentialsFile is the file that contains credentials of CAPV
@@ -86,10 +97,16 @@ type Options struct {
 	// NetworkProvider is the network provider used by Supervisor based clusters.
 	// If not set, it will default to a DummyNetworkProvider which is intended for testing purposes.
 	// VIM based clusters and managers will not need to set this flag.
+	// ****** WHat is VIM based clusters
+	// ******  Read more about Dummy network Provider
 	NetworkProvider string
 }
 
 func (o *Options) defaults() {
+	//***** what is a sink in logger
+	// https://github.com/go-logr/logr says that logger simply fans out messages while
+	//Sink lets you use the actual logging functionality, the difference is still
+	//not clear
 	if o.Logger.GetSink() == nil {
 		o.Logger = ctrllog.Log
 	}
@@ -98,6 +115,13 @@ func (o *Options) defaults() {
 		o.PodName = DefaultPodName
 	}
 
+	// GetConfigOrDie creates a *rest.Config for talking to a Kubernetes apiserver.
+	// If --kubeconfig is set, will use the kubeconfig file at that location.  Otherwise will assume running
+	// in cluster and use the cluster provided kubeconfig.
+	//
+	// Will log an error and exit if there is an error creating the rest.Config
+	// It will die if didn't get the config.
+	// Still need to see how does it really get teh config
 	if o.KubeConfig == nil {
 		o.KubeConfig = config.GetConfigOrDie()
 	}
@@ -112,6 +136,9 @@ func (o *Options) defaults() {
 
 	if ns, ok := os.LookupEnv("POD_NAMESPACE"); ok {
 		o.PodNamespace = ns
+		//see what is the significance of this file. Ask about this file
+		// serach for this file here and read carefully
+		// https://kubernetes.io/docs/reference/access-authn-authz/service-accounts-admin/
 	} else if data, err := os.ReadFile("/var/run/secrets/kubernetes.io/serviceaccount/namespace"); err == nil {
 		if ns := strings.TrimSpace(string(data)); len(ns) > 0 {
 			o.PodNamespace = ns
