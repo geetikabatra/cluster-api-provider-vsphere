@@ -34,6 +34,8 @@ func GetNetworkProvider(ctx *context.ControllerManagerContext) (services.Network
 	switch ctx.NetworkProvider {
 	case NSXNetworkProvider:
 		// TODO: disableFirewall not configurable
+		// ********* read more about NSX-T network provider
+		// also check what if we set disableFW to true
 		ctx.Logger.Info("Pick NSX-T network provider")
 		return network.NsxtNetworkProvider(ctx.Client, "false"), nil
 	case VDSNetworkProvider:

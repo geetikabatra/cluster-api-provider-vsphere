@@ -38,6 +38,7 @@ const (
 
 func TestManager_FileWatch(t *testing.T) {
 	g := NewWithT(t)
+	//*******Why do we need ---
 	contentFmt := `---
 username: '%s'
 password: '%s'
@@ -47,7 +48,8 @@ password: '%s'
 		if err != nil {
 			t.Fatal(err)
 		}
-
+		//***** add this here
+		//t.Cleanup(func() { os.Remove(tmpFile.Name()) })
 		managerOptsTest := &Options{
 			// needs an object ref to be present
 			CredentialsFile: tmpFile.Name(),
@@ -65,11 +67,13 @@ password: '%s'
 		content := fmt.Sprintf(contentFmt, updatedUsername, updatedPassword)
 		_, err = tmpFile.Write([]byte(content))
 		g.Expect(err).To(BeNil())
-
+		//*********see again how eventually works
 		g.Eventually(func() bool {
 			return managerOptsTest.Username == updatedUsername && managerOptsTest.Password == updatedPassword
 		}, 10*time.Second).Should(BeTrue())
-
+		//watch is passed as a parameter
+		//see this image to understand how it works
+		//https://miro.medium.com/max/1400/1*GpuBW-PeJt4LwumKJwUwGQ.png
 		defer func(watch *fsnotify.Watcher) {
 			_ = watch.Close()
 		}(watch)
@@ -97,11 +101,14 @@ password: '%s'
 		watch.Errors <- errors.Errorf("force failure")
 
 		// Update the file and wait for watch to detect the change
+		//****** why do we need this if watch errors are already supplied
 		content := fmt.Sprintf(contentFmt, updatedUsername, updatedPassword)
 		if _, err := tmpFile.Write([]byte(content)); err != nil {
 			fmt.Printf("failed to update credentials in the file err:%s", err.Error())
 		}
 
+		//***if we are adding failed scnario above
+		// tehn why are we checking for updated password
 		g.Eventually(func() bool {
 			return managerOptsTest.Username == updatedUsername && managerOptsTest.Password == updatedPassword
 		}, 10*time.Second).Should(BeTrue())

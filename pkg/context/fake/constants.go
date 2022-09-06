@@ -17,6 +17,9 @@ limitations under the License.
 package fake
 
 const (
+
+	//****** what is the difference between controller and
+	//***** controller manager
 	// ControllerName is the name of the fake controller.
 	ControllerName = "fake-controller"
 

@@ -54,12 +54,14 @@ password: '%s'
 
 	for _, tt := range tests {
 		// for linting reasons
+		//*****for linting reasons what?
 		test := tt
 		content := fmt.Sprintf(contentFmt, tt.username, tt.password)
 		tmpFile, err := os.CreateTemp("", "creds")
 		if err != nil {
 			t.Fatal(err)
 		}
+		// ****** add this to manager_test.go
 		t.Cleanup(func() { os.Remove(tmpFile.Name()) })
 
 		if _, err := tmpFile.Write([]byte(content)); err != nil {
