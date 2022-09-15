@@ -1235,6 +1235,10 @@ spec:
                   of vspherevms can be added as events to the vspherevm object and/or
                   logged in the controller's output."
                 type: string
+              host:
+                description: Host describes the hostname or IP address of the infrastructure
+                  host that the VSphereVM is residing on.
+                type: string
               network:
                 description: Network returns the network status for each of the machine's
                   configured network interfaces.

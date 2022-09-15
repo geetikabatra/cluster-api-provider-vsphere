@@ -27,3 +27,7 @@ import (
 func Convert_v1beta1_VirtualMachineCloneSpec_To_v1alpha4_VirtualMachineCloneSpec(in *v1beta1.VirtualMachineCloneSpec, out *VirtualMachineCloneSpec, s conversion.Scope) error {
 	return autoConvert_v1beta1_VirtualMachineCloneSpec_To_v1alpha4_VirtualMachineCloneSpec(in, out, s)
 }
+
+func Convert_v1beta1_VSphereVMStatus_To_v1alpha4_VSphereVMStatus(in *v1beta1.VSphereVMStatus, out *VSphereVMStatus, s conversion.Scope) error {
+	return autoConvert_v1beta1_VSphereVMStatus_To_v1alpha4_VSphereVMStatus(in, out, s)
+}
