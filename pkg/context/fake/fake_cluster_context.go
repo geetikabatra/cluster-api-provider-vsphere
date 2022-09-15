@@ -33,6 +33,7 @@ func NewClusterContext(ctx *context.ControllerContext) *context.ClusterContext {
 
 	// Add the cluster resources to the fake cluster client.
 	if err := ctx.Client.Create(ctx, &cluster); err != nil {
+		///************shouldn't this be handles properly
 		panic(err)
 	}
 	if err := ctx.Client.Create(ctx, &vsphereCluster); err != nil {
@@ -49,6 +50,7 @@ func NewClusterContext(ctx *context.ControllerContext) *context.ClusterContext {
 
 func newClusterV1() clusterv1.Cluster {
 	return clusterv1.Cluster{
+		//******* what does metav1 objectmeta do?
 		ObjectMeta: metav1.ObjectMeta{
 			Namespace: Namespace,
 			Name:      Clusterv1a2Name,

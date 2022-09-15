@@ -25,9 +25,14 @@ import (
 	"strings"
 
 	"github.com/pkg/errors"
+	//***** read about core v1
+	//
 	corev1 "k8s.io/api/core/v1"
 	rbacv1 "k8s.io/api/rbac/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
+
+	//*****WHat does meta package does
+	//meta package provides meta data of the kubernetes objects
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	clusterv1 "sigs.k8s.io/cluster-api/api/v1beta1"

@@ -17,6 +17,9 @@ limitations under the License.
 package fake
 
 import (
+	//******What does this do?
+	//Package record has all client logic for recording and
+	//reporting "k8s.io/api/core/v1".Event events.
 	clientrecord "k8s.io/client-go/tools/record"
 
 	"sigs.k8s.io/cluster-api-provider-vsphere/pkg/context"
@@ -30,6 +33,7 @@ func NewControllerContext(ctx *context.ControllerManagerContext) *context.Contro
 		ControllerManagerContext: ctx,
 		Name:                     ControllerName,
 		Logger:                   ctx.Logger.WithName(ControllerName),
-		Recorder:                 record.New(clientrecord.NewFakeRecorder(1024)),
+		//How does this recorder is integrated and what does it record
+		Recorder: record.New(clientrecord.NewFakeRecorder(1024)),
 	}
 }

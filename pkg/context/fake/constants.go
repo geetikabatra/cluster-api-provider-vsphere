@@ -19,7 +19,9 @@ package fake
 const (
 
 	//****** what is the difference between controller and
-	//***** controller manager
+	//***** controller manager.
+	//***
+
 	// ControllerName is the name of the fake controller.
 	ControllerName = "fake-controller"
 
@@ -32,6 +34,8 @@ const (
 
 	// LeaderElectionNamespace is the namespace used to control leader election
 	// for the fake controller manager.
+	//****** what is the use of leader election ID and namesapce
+	//in kubebuilder
 	LeaderElectionNamespace = ControllerManagerNamespace
 
 	// LeaderElectionID is the name of the ID used to control leader election
@@ -71,6 +75,8 @@ const (
 	VSphereVMUUID = "20000000-0000-0000-0000-000000000002"
 
 	// PodCIDR is the CIDR for the pod network.
+	// ***** what is a pOD CIDR, read more about classless
+	//interdomain routing
 	PodCIDR = "1.0.0.0/16"
 
 	// ServiceCIDR is the CIDR for the service network.
