@@ -110,6 +110,15 @@ rules:
 - apiGroups:
   - cluster.x-k8s.io
   resources:
+  - clusters
+  - machines
+  verbs:
+  - get
+  - list
+  - watch
+- apiGroups:
+  - cluster.x-k8s.io
+  resources:
   - machines
   verbs:
   - get
@@ -137,9 +146,11 @@ rules:
   resources:
   - nodes
   verbs:
-  - delete
   - get
   - list
+  - patch
+  - update
+  - watch
 - apiGroups:
   - ""
   resources:
