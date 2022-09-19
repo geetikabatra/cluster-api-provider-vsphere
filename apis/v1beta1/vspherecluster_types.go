@@ -29,6 +29,17 @@ const (
 	ClusterFinalizer = "vspherecluster.infrastructure.cluster.x-k8s.io"
 )
 
+// VCenterVersion conveys the API version of the vCenter instance.
+type VCenterVersion string
+
+const (
+	Version67 VCenterVersion = "v6.7"
+
+	Version70 VCenterVersion = "v7.0"
+
+	Version80 VCenterVersion = "v8.0"
+)
+
 // VSphereClusterSpec defines the desired state of VSphereCluster
 type VSphereClusterSpec struct {
 	// Server is the address of the vSphere endpoint.
@@ -59,6 +70,9 @@ type VSphereClusterStatus struct {
 
 	// FailureDomains is a list of failure domain objects synced from the infrastructure provider.
 	FailureDomains clusterv1.FailureDomains `json:"failureDomains,omitempty"`
+
+	// VCenterVersion defines the version of the vCenter server defined in the spec.
+	VCenterVersion VCenterVersion `json:"vCenterVersion,omitempty"`
 }
 
 // +kubebuilder:object:root=true
