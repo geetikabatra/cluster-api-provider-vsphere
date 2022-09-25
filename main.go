@@ -307,6 +307,9 @@ func setupVAPIControllers(ctx *context.ControllerManagerContext, mgr ctrlmgr.Man
 			return err
 		}
 	}
+	if err := controllers.AddAffinityControllerToManager(ctx, mgr); err != nil {
+		return err
+	}
 	return nil
 }
 

@@ -119,6 +119,14 @@ rules:
 - apiGroups:
   - cluster.x-k8s.io
   resources:
+  - machinedeployments
+  verbs:
+  - get
+  - list
+  - watch
+- apiGroups:
+  - cluster.x-k8s.io
+  resources:
   - machines
   verbs:
   - get
@@ -129,6 +137,14 @@ rules:
   - cluster.x-k8s.io
   resources:
   - machines/status
+  verbs:
+  - get
+  - list
+  - watch
+- apiGroups:
+  - controlplane.cluster.x-k8s.io
+  resources:
+  - kubeadmcontrolplanes
   verbs:
   - get
   - list
@@ -255,6 +271,14 @@ rules:
   - get
   - patch
   - update
+- apiGroups:
+  - infrastructure.cluster.x-k8s.io
+  resources:
+  - vspheremachinetemplates
+  verbs:
+  - get
+  - list
+  - watch
 - apiGroups:
   - infrastructure.cluster.x-k8s.io
   resources:
