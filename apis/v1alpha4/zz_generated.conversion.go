@@ -1748,6 +1748,7 @@ func autoConvert_v1beta1_VSphereVMStatus_To_v1alpha4_VSphereVMStatus(in *v1beta1
 	out.FailureReason = (*errors.MachineStatusError)(unsafe.Pointer(in.FailureReason))
 	out.FailureMessage = (*string)(unsafe.Pointer(in.FailureMessage))
 	out.Conditions = *(*apiv1alpha4.Conditions)(unsafe.Pointer(&in.Conditions))
+	// WARNING: in.ModuleUUID requires manual conversion: does not exist in peer-type
 	return nil
 }
 

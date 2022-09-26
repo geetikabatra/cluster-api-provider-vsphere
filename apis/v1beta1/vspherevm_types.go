@@ -128,6 +128,9 @@ type VSphereVMStatus struct {
 	// Conditions defines current service state of the VSphereVM.
 	// +optional
 	Conditions clusterv1.Conditions `json:"conditions,omitempty"`
+
+	// +optional
+	ModuleUUID *string `json:"moduleUUID,omitempty"`
 }
 
 // +kubebuilder:object:root=true

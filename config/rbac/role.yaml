@@ -127,6 +127,15 @@ rules:
 - apiGroups:
   - cluster.x-k8s.io
   resources:
+  - machinedeployments
+  - machinesets
+  verbs:
+  - get
+  - list
+  - watch
+- apiGroups:
+  - cluster.x-k8s.io
+  resources:
   - machines
   verbs:
   - get

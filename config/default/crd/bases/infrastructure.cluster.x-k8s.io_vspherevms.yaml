@@ -1239,6 +1239,8 @@ spec:
                 description: Host describes the hostname or IP address of the infrastructure
                   host that the VSphereVM is residing on.
                 type: string
+              moduleUUID:
+                type: string
               network:
                 description: Network returns the network status for each of the machine's
                   configured network interfaces.
