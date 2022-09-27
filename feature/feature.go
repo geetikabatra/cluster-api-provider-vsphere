@@ -36,6 +36,11 @@ const (
 	//
 	// alpha: v1.5
 	NodeLabeling featuregate.Feature = "NodeLabeling"
+
+	// NodeAntiAffinity is a feature gate for the NodeAntiAffinity functionality.
+	//
+	// alpha: v1.5
+	NodeAntiAffinity featuregate.Feature = "NodeAntiAffinity"
 )
 
 func init() {
@@ -46,5 +51,6 @@ func init() {
 // To add a new feature, define a key for it above and add it here.
 var defaultCAPVFeatureGates = map[featuregate.Feature]featuregate.FeatureSpec{
 	// Every feature should be initiated here:
-	NodeLabeling: {Default: false, PreRelease: featuregate.Alpha},
+	NodeLabeling:     {Default: false, PreRelease: featuregate.Alpha},
+	NodeAntiAffinity: {Default: false, PreRelease: featuregate.Alpha},
 }
