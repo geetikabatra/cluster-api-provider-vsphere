@@ -31,23 +31,19 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	vmwarev1 "sigs.k8s.io/cluster-api-provider-vsphere/apis/vmware/v1beta1"
-	"sigs.k8s.io/cluster-api-provider-vsphere/pkg/builder"
+	helpers "sigs.k8s.io/cluster-api-provider-vsphere/test/helpers/vmware"
 )
-
-// This object is used for unit tests setup only
-// Integration tests will be run using the existing envTest setup.
-var ServiceAccountProviderTestsuite = builder.NewTestSuiteForController(NewServiceAccountReconciler)
 
 const (
 	testProviderSvcAccountName = "test-pvcsi"
 
 	testTargetNS             = "test-pvcsi-system"
-	testTargetSecret         = "test-pvcsi-secret" // nolint:gosec
+	testTargetSecret         = "test-pvcsi-secret" //nolint:gosec
 	testSvcAccountSecretName = testProviderSvcAccountName + "-token-abcdef"
 	testSystemSvcAcctNs      = "test-system-svc-acct-namespace"
 	testSystemSvcAcctCM      = "test-system-svc-acct-cm"
 
-	testSecretToken = "ZXlKaGJHY2lPaUpTVXpJMU5pSXNJbXRwWkNJNklp" // nolint:gosec
+	testSecretToken = "ZXlKaGJHY2lPaUpTVXpJMU5pSXNJbXRwWkNJNklp" //nolint:gosec
 )
 
 var truePointer = true
@@ -109,7 +105,7 @@ func assertServiceAccountAndUpdateSecret(ctx goctx.Context, ctrlClient client.Cl
 	Expect(ctrlClient.Update(ctx, svcAccount)).To(Succeed())
 }
 
-func assertTargetSecret(ctx goctx.Context, guestClient client.Client, namespace, name string) { // nolint
+func assertTargetSecret(ctx goctx.Context, guestClient client.Client, namespace, name string) { //nolint
 	secret := &corev1.Secret{}
 	assertEventuallyExistsInNamespace(ctx, guestClient, namespace, name, secret)
 	EventuallyWithOffset(2, func() []byte {
@@ -119,7 +115,7 @@ func assertTargetSecret(ctx goctx.Context, guestClient client.Client, namespace,
 	}).Should(Equal([]byte(testSecretToken)))
 }
 
-func assertTargetNamespace(ctx *builder.UnitTestContextForController, guestClient client.Client, namespaceName string, isExist bool) {
+func assertTargetNamespace(ctx *helpers.UnitTestContextForController, guestClient client.Client, namespaceName string, isExist bool) {
 	namespace := &corev1.Namespace{}
 	err := guestClient.Get(ctx, client.ObjectKey{Name: namespaceName}, namespace)
 	if isExist {
@@ -129,7 +125,7 @@ func assertTargetNamespace(ctx *builder.UnitTestContextForController, guestClien
 	}
 }
 
-func assertRoleWithGetPVC(ctx *builder.UnitTestContextForController, ctrlClient client.Client, namespace, name string) {
+func assertRoleWithGetPVC(ctx *helpers.UnitTestContextForController, ctrlClient client.Client, namespace, name string) {
 	var roleList rbacv1.RoleList
 	opts := &client.ListOptions{
 		Namespace: namespace,
@@ -147,7 +143,7 @@ func assertRoleWithGetPVC(ctx *builder.UnitTestContextForController, ctrlClient 
 	}))
 }
 
-func assertRoleBinding(_ *builder.UnitTestContextForController, ctrlClient client.Client, namespace, name string) {
+func assertRoleBinding(_ *helpers.UnitTestContextForController, ctrlClient client.Client, namespace, name string) {
 	var roleBindingList rbacv1.RoleBindingList
 	opts := &client.ListOptions{
 		Namespace: namespace,
@@ -163,9 +159,8 @@ func assertRoleBinding(_ *builder.UnitTestContextForController, ctrlClient clien
 	}))
 }
 
-// nolint
-func assertProviderServiceAccountsCondition(vCluster *vmwarev1.VSphereCluster, status corev1.ConditionStatus,
-	message string, reason string, severity clusterv1.ConditionSeverity) {
+// assertProviderServiceAccountsCondition asserts the condition on the ProviderServiceAccount CR.
+func assertProviderServiceAccountsCondition(vCluster *vmwarev1.VSphereCluster, status corev1.ConditionStatus, message string, reason string, severity clusterv1.ConditionSeverity) { //nolint
 	c := conditions.Get(vCluster, vmwarev1.ProviderServiceAccountsReadyCondition)
 	Expect(c).NotTo(BeNil())
 	Expect(c.Status).To(Equal(status))

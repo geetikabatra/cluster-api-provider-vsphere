@@ -26,11 +26,14 @@ import (
 	"reflect"
 	"time"
 
+	"github.com/spf13/pflag"
 	"gopkg.in/fsnotify.v1"
 	"k8s.io/apimachinery/pkg/api/meta"
+	cliflag "k8s.io/component-base/cli/flag"
+	"k8s.io/component-base/logs"
+	_ "k8s.io/component-base/logs/json/register"
 	"k8s.io/klog/v2"
-	"k8s.io/klog/v2/klogr"
-	ctrllog "sigs.k8s.io/controller-runtime/pkg/log"
+	ctrl "sigs.k8s.io/controller-runtime"
 	ctrlmgr "sigs.k8s.io/controller-runtime/pkg/manager"
 	ctrlsig "sigs.k8s.io/controller-runtime/pkg/manager/signals"
 
@@ -45,10 +48,12 @@ import (
 )
 
 var (
-	setupLog = ctrllog.Log.WithName("entrypoint")
+	setupLog   = ctrl.Log.WithName("entrypoint")
+	logOptions = logs.NewOptions()
 
-	managerOpts manager.Options
-	syncPeriod  time.Duration
+	managerOpts     manager.Options
+	syncPeriod      time.Duration
+	profilerAddress string
 
 	defaultProfilerAddr      = os.Getenv("PROFILER_ADDR")
 	defaultSyncPeriod        = manager.DefaultSyncPeriod
@@ -59,23 +64,19 @@ var (
 	defaultKeepAliveDuration = constants.DefaultKeepAliveDuration
 )
 
-func main() {
-	rand.Seed(time.Now().UnixNano())
-
-	klog.InitFlags(nil)
-	ctrllog.SetLogger(klogr.New())
-	if err := flag.Set("v", "2"); err != nil {
-		klog.Fatalf("failed to set log level: %v", err)
-	}
+// InitFlags initializes the flags.
+func InitFlags(fs *pflag.FlagSet) {
+	logs.AddFlags(fs, logs.SkipLoggingConfigurationFlags())
+	logOptions.AddFlags(fs)
 
 	flag.StringVar(
 		&managerOpts.MetricsBindAddress,
-		"metrics-addr",
+		"metrics-bind-addr",
 		"localhost:8080",
 		"The address the metric endpoint binds to.")
 	flag.BoolVar(
 		&managerOpts.LeaderElection,
-		"enable-leader-election",
+		"leader-elect",
 		true,
 		"Enable leader election for controller manager. Enabling this will ensure there is only one active controller manager.")
 	flag.StringVar(
@@ -88,7 +89,8 @@ func main() {
 		"namespace",
 		"",
 		"Namespace that the controller watches to reconcile cluster-api objects. If unspecified, the controller watches for cluster-api objects across all namespaces.")
-	profilerAddress := flag.String(
+	flag.StringVar(
+		&profilerAddress,
 		"profiler-address",
 		defaultProfilerAddr,
 		"Bind address to expose the pprof profiler (e.g. localhost:6060)")
@@ -129,20 +131,41 @@ func main() {
 		"enable-keep-alive",
 		defaultEnableKeepAlive,
 		"DEPRECATED: feature to enable keep alive handler in vsphere sessions. This functionality is enabled by default now")
-
 	flag.DurationVar(
 		&managerOpts.KeepAliveDuration,
 		"keep-alive-duration",
 		defaultKeepAliveDuration,
-		"idle time interval(minutes) in between send() requests in keepalive handler")
-
+		"idle time interval(minutes) in between send() requests in keepalive handler",
+	)
 	flag.StringVar(
 		&managerOpts.NetworkProvider,
 		"network-provider",
 		"",
-		"network provider to be used by Supervisor based clusters.")
+		"network provider to be used by Supervisor based clusters.",
+	)
 
-	flag.Parse()
+	feature.MutableGates.AddFlag(fs)
+}
+
+func main() {
+	rand.Seed(time.Now().UnixNano())
+
+	InitFlags(pflag.CommandLine)
+	pflag.CommandLine.AddGoFlagSet(flag.CommandLine)
+	pflag.CommandLine.SetNormalizeFunc(cliflag.WordSepNormalizeFunc)
+	if err := pflag.CommandLine.Set("v", "2"); err != nil {
+		setupLog.Error(err, "failed to set log level: %v")
+		os.Exit(1)
+	}
+	pflag.Parse()
+
+	if err := logOptions.ValidateAndApply(nil); err != nil {
+		setupLog.Error(err, "unable to start manager")
+		os.Exit(1)
+	}
+
+	// klog.Background will automatically use the right logger.
+	ctrl.SetLogger(klog.Background())
 
 	if managerOpts.Namespace != "" {
 		setupLog.Info(
@@ -150,18 +173,17 @@ func main() {
 			"namespace", managerOpts.Namespace)
 	}
 
-	if *profilerAddress != "" {
+	if profilerAddress != "" {
 		setupLog.Info(
 			"Profiler listening for requests",
-			"profiler-address", *profilerAddress)
-		go runProfiler(*profilerAddress)
+			"profiler-address", profilerAddress)
+		go runProfiler(profilerAddress)
 	}
 	setupLog.V(1).Info(fmt.Sprintf("feature gates: %+v\n", feature.Gates))
 
 	managerOpts.SyncPeriod = &syncPeriod
 
-	// Create a function that adds all of the controllers and webhooks to the
-	// manager.
+	// Create a function that adds all the controllers and webhooks to the manager.
 	addToManager := func(ctx *context.ControllerManagerContext, mgr ctrlmgr.Manager) error {
 		cluster := &v1beta1.VSphereCluster{}
 		gvr := v1beta1.GroupVersion.WithResource(reflect.TypeOf(cluster).Elem().Name())
@@ -236,7 +258,7 @@ func setupVAPIControllers(ctx *context.ControllerManagerContext, mgr ctrlmgr.Man
 		return err
 	}
 
-	if err := (&v1beta1.VSphereMachineTemplate{}).SetupWebhookWithManager(mgr); err != nil {
+	if err := (&v1beta1.VSphereMachineTemplateWebhook{}).SetupWebhookWithManager(mgr); err != nil {
 		return err
 	}
 	if err := (&v1beta1.VSphereMachineTemplateList{}).SetupWebhookWithManager(mgr); err != nil {
@@ -278,6 +300,18 @@ func setupVAPIControllers(ctx *context.ControllerManagerContext, mgr ctrlmgr.Man
 	}
 	if err := controllers.AddVSphereDeploymentZoneControllerToManager(ctx, mgr); err != nil {
 		return err
+	}
+
+	if feature.Gates.Enabled(feature.NodeLabeling) {
+		if err := controllers.AddNodeLabelControllerToManager(ctx, mgr); err != nil {
+			return err
+		}
+	}
+
+	if feature.Gates.Enabled(feature.NodeAntiAffinity) {
+		if err := controllers.AddAffinityControllerToManager(ctx, mgr); err != nil {
+			return err
+		}
 	}
 	return nil
 }

@@ -32,6 +32,11 @@ export GOPROXY
 # Active module mode, as we use go modules to manage dependencies
 export GO111MODULE := on
 
+#
+# Kubebuilder.
+#
+export KUBEBUILDER_ENVTEST_KUBERNETES_VERSION ?= 1.23.3
+
 # Directories
 ROOT_DIR:=$(shell dirname $(realpath $(firstword $(MAKEFILE_LIST))))
 BIN_DIR := $(ROOT_DIR)/bin
@@ -55,6 +60,7 @@ GOLANGCI_LINT := $(TOOLS_BIN_DIR)/golangci-lint
 GOVC := $(TOOLS_BIN_DIR)/govc
 KIND := $(TOOLS_BIN_DIR)/kind
 KUSTOMIZE := $(TOOLS_BIN_DIR)/kustomize
+SETUP_ENVTEST := $(abspath $(TOOLS_BIN_DIR)/setup-envtest)
 CONVERSION_VERIFIER := $(abspath $(TOOLS_BIN_DIR)/conversion-verifier)
 GO_APIDIFF := $(TOOLS_BIN_DIR)/go-apidiff
 TOOLING_BINARIES := $(CONTROLLER_GEN) $(CONVERSION_GEN) $(GINKGO) $(GOLANGCI_LINT) $(GOVC) $(KIND) $(KUSTOMIZE) $(CONVERSION_VERIFIER) $(GO_APIDIFF)
@@ -79,8 +85,7 @@ BUILD_DIR := .build
 OVERRIDES_DIR := $(HOME)/.cluster-api/overrides/infrastructure-vsphere/$(VERSION)
 
 # Architecture variables
-ARCH ?= amd64
-ALL_ARCH = amd64 arm arm64 ppc64le s390x
+ARCH ?= $(shell go env GOARCH)
 
 # Common docker variables
 IMAGE_NAME ?= manager
@@ -101,7 +106,6 @@ RELEASE_CONTROLLER_IMG := $(RELEASE_REGISTRY)/$(IMAGE_NAME)
 DEV_REGISTRY ?= gcr.io/$(shell gcloud config get-value project)
 DEV_CONTROLLER_IMG ?= $(DEV_REGISTRY)/vsphere-$(IMAGE_NAME)
 DEV_TAG ?= dev
-DEV_MANIFEST_IMG := $(DEV_CONTROLLER_IMG)-$(ARCH)
 
 # Set build time variables including git version details
 LDFLAGS := $(shell hack/version.sh)
@@ -117,14 +121,18 @@ help: ## Display this help
 ## Testing
 ## --------------------------------------
 
+KUBEBUILDER_ASSETS ?= $(shell $(SETUP_ENVTEST) use --use-env -p path $(KUBEBUILDER_ENVTEST_KUBERNETES_VERSION))
+
 .PHONY: test
-test: $(GOVC)
+test: $(SETUP_ENVTEST) $(GOVC)
 	$(MAKE) generate lint-go
-	source ./hack/fetch_ext_bins.sh; fetch_tools; setup_envs; export GOVC_BIN_PATH=$(GOVC); go test -v ./apis/... ./controllers/... ./pkg/... $(TEST_ARGS)
+	KUBEBUILDER_ASSETS="$(KUBEBUILDER_ASSETS)" GOVC_BIN_PATH=$(GOVC) go test -v ./apis/... ./controllers/... ./pkg/... $(TEST_ARGS)
+
 
 .PHONY: e2e-image
 e2e-image: ## Build the e2e manager image
-	docker build --build-arg ldflags="$(LDFLAGS)" --tag="gcr.io/k8s-staging-cluster-api/capv-manager:e2e" .
+	docker buildx build --platform linux/$(ARCH) --output=type=docker \
+		--build-arg ldflags="$(LDFLAGS)" --tag="gcr.io/k8s-staging-cluster-api/capv-manager:e2e" .
 
 .PHONY: e2e-templates
 e2e-templates: ## Generate e2e cluster templates
@@ -141,6 +149,8 @@ e2e-templates: ## Generate e2e cluster templates
 	cp $(RELEASE_DIR)/cluster-template-topology.yaml $(E2E_TEMPLATE_DIR)/kustomization/topology/cluster-template-topology.yaml
 	cp $(RELEASE_DIR)/clusterclass-template.yaml $(E2E_TEMPLATE_DIR)/clusterclass-quick-start.yaml
 	"$(KUSTOMIZE)" --load-restrictor LoadRestrictionsNone build $(E2E_TEMPLATE_DIR)/kustomization/topology > $(E2E_TEMPLATE_DIR)/cluster-template-topology.yaml
+	# for PCI passthrough template
+	"$(KUSTOMIZE)" --load-restrictor LoadRestrictionsNone build $(E2E_TEMPLATE_DIR)/kustomization/pci > $(E2E_TEMPLATE_DIR)/cluster-template-pci.yaml
 
 .PHONY: test-integration
 test-integration: e2e-image
@@ -189,6 +199,9 @@ clusterctl: $(CLUSTERCTL) ## Build clusterctl binary
 $(CLUSTERCTL): go.mod
 	go build -o $@ sigs.k8s.io/cluster-api/cmd/clusterctl
 
+$(SETUP_ENVTEST): $(TOOLS_DIR)/go.mod # Build setup-envtest from tools folder.
+	cd $(TOOLS_DIR); go build -tags=tools -o $(TOOLS_BIN_DIR)/setup-envtest sigs.k8s.io/controller-runtime/tools/setup-envtest
+
 ## --------------------------------------
 ## Tooling Binaries
 ## --------------------------------------
@@ -218,7 +231,7 @@ lint-go-full: lint-go ## Run slower linters to detect possible issues
 
 .PHONY: lint-markdown
 lint-markdown: ## Lint the project's markdown
-	docker run --rm -v "$$(pwd)":/build$(DOCKER_VOL_OPTS) gcr.io/cluster-api-provider-vsphere/extra/mdlint:0.31.1 -- /md/lint -i vendor -i contrib/haproxy/openapi .
+	docker run --rm -v "$$(pwd)":/build$(DOCKER_VOL_OPTS) gcr.io/cluster-api-provider-vsphere/extra/mdlint:0.17.0 -- /md/lint -i vendor -i contrib/haproxy/openapi .
 
 .PHONY: lint-shell
 lint-shell: ## Lint the project's shell scripts
@@ -444,8 +457,14 @@ check: ## Verify and lint the project
 
 .PHONY: docker-build
 docker-build: ## Build the docker image for controller-manager
-	docker build --pull --build-arg ARCH=$(ARCH) --build-arg ldflags="$(LDFLAGS)"  . -t $(DEV_CONTROLLER_IMG):$(DEV_TAG)
+	docker buildx build --platform linux/$(ARCH) --output=type=docker \
+		--pull --build-arg ldflags="$(LDFLAGS)" \
+		-t $(DEV_CONTROLLER_IMG):$(DEV_TAG) .
 
 .PHONY: docker-push
 docker-push: ## Push the docker image
-	docker push $(DEV_CONTROLLER_IMG):$(DEV_TAG)
+	docker buildx inspect capv &>/dev/null || docker buildx create --name capv
+	docker buildx build --builder capv --platform linux/amd64,linux/arm64 --output=type=registry \
+		--pull --build-arg ldflags="$(LDFLAGS)" \
+		-t $(DEV_CONTROLLER_IMG):$(DEV_TAG) .
+	docker buildx rm capv

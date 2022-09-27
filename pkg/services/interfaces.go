@@ -31,10 +31,11 @@ import (
 // VSphereMachineService is used for vsphere VM lifecycle and syncing with VSphereMachine types.
 type VSphereMachineService interface {
 	FetchVSphereMachine(client client.Client, name types.NamespacedName) (context.MachineContext, error)
-	FetchVSphereCluster(client client.Client, cluster *clusterv1.Cluster, controllerContext *context.ControllerContext, machineContext context.MachineContext) (context.MachineContext, error)
+	FetchVSphereCluster(client client.Client, cluster *clusterv1.Cluster, machineContext context.MachineContext) (context.MachineContext, error)
 	ReconcileDelete(ctx context.MachineContext) error
 	SyncFailureReason(ctx context.MachineContext) (bool, error)
 	ReconcileNormal(ctx context.MachineContext) (bool, error)
+	GetHostInfo(ctx context.MachineContext) (string, error)
 }
 
 // VirtualMachineService is a service for creating/updating/deleting virtual
@@ -74,12 +75,12 @@ type NetworkProvider interface {
 	// Returns an empty string if the operation is not supported
 	GetClusterNetworkName(ctx *vmware.ClusterContext) (string, error)
 
-	// GetServiceAnnotations returns the annotations, if any, to place on a VM Service.
+	// GetVMServiceAnnotations returns the annotations, if any, to place on a VM Service.
 	GetVMServiceAnnotations(ctx *vmware.ClusterContext) (map[string]string, error)
 
 	// ConfigureVirtualMachine configures a VM for the particular network
 	ConfigureVirtualMachine(ctx *vmware.ClusterContext, vm *vmoprv1.VirtualMachine) error
 
-	// Verify the status of the network after vnet creation
+	// VerifyNetworkStatus verifies the status of the network after vnet creation
 	VerifyNetworkStatus(ctx *vmware.ClusterContext, obj runtime.Object) error
 }

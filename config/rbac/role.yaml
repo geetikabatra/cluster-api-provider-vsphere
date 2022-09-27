@@ -99,15 +99,6 @@ rules:
   verbs:
   - get
 - apiGroups:
-  - bootstrap.cluster.x-k8s.io
-  resources:
-  - kubeadmconfigtemplates
-  verbs:
-  - delete
-  - get
-  - list
-  - watch
-- apiGroups:
   - cluster.x-k8s.io
   resources:
   - clusters
@@ -119,8 +110,50 @@ rules:
 - apiGroups:
   - cluster.x-k8s.io
   resources:
+  - clusters
   - machines
+  verbs:
+  - get
+  - list
+  - watch
+- apiGroups:
+  - cluster.x-k8s.io
+  resources:
+  - machinedeployments
+  verbs:
+  - get
+  - list
+  - watch
+- apiGroups:
+  - cluster.x-k8s.io
+  resources:
+  - machinedeployments
+  - machinesets
+  verbs:
+  - get
+  - list
+  - watch
+- apiGroups:
+  - cluster.x-k8s.io
+  resources:
+  - machines
+  verbs:
+  - get
+  - list
+  - patch
+  - watch
+- apiGroups:
+  - cluster.x-k8s.io
+  resources:
   - machines/status
+  verbs:
+  - get
+  - list
+  - watch
+- apiGroups:
+  - controlplane.cluster.x-k8s.io
+  resources:
+  - kubeadmcontrolplanes
   verbs:
   - get
   - list
@@ -132,6 +165,16 @@ rules:
   verbs:
   - get
   - list
+  - watch
+- apiGroups:
+  - ""
+  resources:
+  - nodes
+  verbs:
+  - get
+  - list
+  - patch
+  - update
   - watch
 - apiGroups:
   - ""
@@ -237,6 +280,14 @@ rules:
   - get
   - patch
   - update
+- apiGroups:
+  - infrastructure.cluster.x-k8s.io
+  resources:
+  - vspheremachinetemplates
+  verbs:
+  - get
+  - list
+  - watch
 - apiGroups:
   - infrastructure.cluster.x-k8s.io
   resources:
@@ -394,6 +445,18 @@ rules:
   - get
   - patch
   - update
+- apiGroups:
+  - vmware.infrastructure.cluster.x-k8s.io
+  resources:
+  - vsphereclustertemplates
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
 - apiGroups:
   - vmware.infrastructure.cluster.x-k8s.io
   resources:

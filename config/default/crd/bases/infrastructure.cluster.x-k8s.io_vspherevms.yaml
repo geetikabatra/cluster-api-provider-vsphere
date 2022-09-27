@@ -1088,6 +1088,30 @@ spec:
                   value in the template from which the virtual machine is cloned.
                 format: int32
                 type: integer
+              os:
+                description: OS is the Operating System of the virtual machine Defaults
+                  to Linux
+                type: string
+              pciDevices:
+                description: PciDevices is the list of pci devices used by the virtual
+                  machine.
+                items:
+                  description: PCIDeviceSpec defines virtual machine's PCI configuration
+                  properties:
+                    deviceId:
+                      description: DeviceID is the device ID of a virtual machine's
+                        PCI, in integer. Defaults to the eponymous property value
+                        in the template from which the virtual machine is cloned.
+                      format: int32
+                      type: integer
+                    vendorId:
+                      description: VendorId is the vendor ID of a virtual machine's
+                        PCI, in integer. Defaults to the eponymous property value
+                        in the template from which the virtual machine is cloned.
+                      format: int32
+                      type: integer
+                  type: object
+                type: array
               resourcePool:
                 description: ResourcePool is the name or inventory path of the resource
                   pool in which the virtual machine is created/located.
@@ -1210,6 +1234,12 @@ spec:
                   the vm. \n Any transient errors that occur during the reconciliation
                   of vspherevms can be added as events to the vspherevm object and/or
                   logged in the controller's output."
+                type: string
+              host:
+                description: Host describes the hostname or IP address of the infrastructure
+                  host that the VSphereVM is residing on.
+                type: string
+              moduleUUID:
                 type: string
               network:
                 description: Network returns the network status for each of the machine's

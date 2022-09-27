@@ -49,7 +49,7 @@ func (v *VimMachineService) FetchVSphereMachine(c client.Client, name types.Name
 	return &context.VIMMachineContext{VSphereMachine: vsphereMachine}, err
 }
 
-func (v *VimMachineService) FetchVSphereCluster(c client.Client, cluster *clusterv1.Cluster, controllerContext *context.ControllerContext, machineContext context.MachineContext) (context.MachineContext, error) {
+func (v *VimMachineService) FetchVSphereCluster(c client.Client, cluster *clusterv1.Cluster, machineContext context.MachineContext) (context.MachineContext, error) {
 	ctx, ok := machineContext.(*context.VIMMachineContext)
 	if !ok {
 		return nil, errors.New("received unexpected VIMMachineContext type")
@@ -120,9 +120,9 @@ func (v *VimMachineService) ReconcileNormal(c context.MachineContext) (bool, err
 		return false, err
 	}
 
-	vm, err := v.createOrUpdateVSPhereVM(ctx, vsphereVM)
-
-	if err != nil && !apierrors.IsAlreadyExists(err) {
+	vm, err := v.createOrPatchVSPhereVM(ctx, vsphereVM)
+	if err != nil {
+		ctx.Logger.Error(err, "error creating or patching VM", "vsphereVM", vsphereVM)
 		return false, err
 	}
 
@@ -171,6 +171,27 @@ func (v *VimMachineService) ReconcileNormal(c context.MachineContext) (bool, err
 
 	ctx.VSphereMachine.Status.Ready = true
 	return false, nil
+}
+
+func (v *VimMachineService) GetHostInfo(c context.MachineContext) (string, error) {
+	ctx, ok := c.(*context.VIMMachineContext)
+	if !ok {
+		return "", errors.New("received unexpected VIMMachineContext type")
+	}
+
+	vsphereVM := &infrav1.VSphereVM{}
+	if err := ctx.Client.Get(ctx, client.ObjectKey{
+		Namespace: ctx.Machine.Namespace,
+		Name:      ctx.Machine.Name,
+	}, vsphereVM); err != nil {
+		return "", err
+	}
+
+	if conditions.IsTrue(vsphereVM, infrav1.VMProvisionedCondition) {
+		return vsphereVM.Status.Host, nil
+	}
+	ctx.Logger.V(4).Info("VMProvisionedCondition is set to false", "vsphereVM", vsphereVM.Name)
+	return "", nil
 }
 
 func (v *VimMachineService) findVMPre7(ctx *context.VIMMachineContext) (*infrav1.VSphereVM, error) {
@@ -307,7 +328,7 @@ func (v *VimMachineService) reconcileNetwork(ctx *context.VIMMachineContext, vm 
 	return true, nil
 }
 
-func (v *VimMachineService) createOrUpdateVSPhereVM(ctx *context.VIMMachineContext, vsphereVM *infrav1.VSphereVM) (runtime.Object, error) {
+func (v *VimMachineService) createOrPatchVSPhereVM(ctx *context.VIMMachineContext, vsphereVM *infrav1.VSphereVM) (runtime.Object, error) {
 	// Create or update the VSphereVM resource.
 	vm := &infrav1.VSphereVM{
 		ObjectMeta: metav1.ObjectMeta{
@@ -376,14 +397,54 @@ func (v *VimMachineService) createOrUpdateVSPhereVM(ctx *context.VIMMachineConte
 		}
 		return nil
 	}
-	if _, err := ctrlutil.CreateOrUpdate(ctx, ctx.Client, vm, mutateFn); err != nil {
-		if apierrors.IsAlreadyExists(err) {
-			ctx.Logger.Info("VSphereVM already exists")
-			return vsphereVM, err
-		}
-		ctx.Logger.Error(err, "failed to CreateOrUpdate VSphereVM",
-			"namespace", vm.Namespace, "name", vm.Name)
+
+	vmKey := types.NamespacedName{
+		Namespace: vm.Namespace,
+		Name:      vm.Name,
+	}
+	result, err := ctrlutil.CreateOrPatch(ctx, ctx.Client, vm, mutateFn)
+	if err != nil {
+		ctx.Logger.Error(
+			err,
+			"failed to CreateOrPatch VSphereVM",
+			"namespace",
+			vm.Namespace,
+			"name",
+			vm.Name,
+		)
 		return nil, err
+	}
+	switch result {
+	case ctrlutil.OperationResultNone:
+		ctx.Logger.Info(
+			"no update required for vm",
+			"vm",
+			vmKey,
+		)
+	case ctrlutil.OperationResultCreated:
+		ctx.Logger.Info(
+			"created vm",
+			"vm",
+			vmKey,
+		)
+	case ctrlutil.OperationResultUpdated:
+		ctx.Logger.Info(
+			"updated vm",
+			"vm",
+			vmKey,
+		)
+	case ctrlutil.OperationResultUpdatedStatus:
+		ctx.Logger.Info(
+			"updated vm and vm status",
+			"vm",
+			vmKey,
+		)
+	case ctrlutil.OperationResultUpdatedStatusOnly:
+		ctx.Logger.Info(
+			"updated vm status",
+			"vm",
+			vmKey,
+		)
 	}
 
 	return vm, nil

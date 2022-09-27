@@ -228,6 +228,7 @@ func defaultVirtualMachineCloneSpec() infrav1.VirtualMachineCloneSpec {
 		Datastore:         env.VSphereDatastoreVar,
 		StoragePolicyName: env.VSphereStoragePolicyVar,
 		Folder:            env.VSphereFolderVar,
+		OS:                infrav1.Linux,
 	}
 }
 
@@ -245,10 +246,9 @@ func defaultKubeadmInitSpec(files []bootstrapv1.File) bootstrapv1.KubeadmConfigS
 			},
 			ControllerManager: defaultControlPlaneComponent(),
 		},
-		Users:                    defaultUsers(),
-		PreKubeadmCommands:       defaultPreKubeadmCommands(),
-		UseExperimentalRetryJoin: true,
-		Files:                    files,
+		Users:              defaultUsers(),
+		PreKubeadmCommands: defaultPreKubeadmCommands(),
+		Files:              files,
 	}
 }
 
@@ -339,7 +339,7 @@ func kubeVIPPodSpec() *corev1.Pod {
 			Containers: []corev1.Container{
 				{
 					Name:            "kube-vip",
-					Image:           "ghcr.io/kube-vip/kube-vip:v0.4.1",
+					Image:           "ghcr.io/kube-vip/kube-vip:v0.5.0",
 					ImagePullPolicy: corev1.PullIfNotPresent,
 					Args: []string{
 						"manager",

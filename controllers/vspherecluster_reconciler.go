@@ -222,11 +222,19 @@ func (r clusterReconciler) reconcileNormal(ctx *context.ClusterContext) (reconci
 		return reconcile.Result{}, err
 	}
 
-	if err := r.reconcileVCenterConnectivity(ctx); err != nil {
+	vcenterSession, err := r.reconcileVCenterConnectivity(ctx)
+	if err != nil {
 		conditions.MarkFalse(ctx.VSphereCluster, infrav1.VCenterAvailableCondition, infrav1.VCenterUnreachableReason, clusterv1.ConditionSeverityError, err.Error())
 		return reconcile.Result{}, errors.Wrapf(err,
 			"unexpected error while probing vcenter for %s", ctx)
 	}
+
+	// TODO (srm09): Is a condition better?
+	err = r.reconcileVCenterVersion(ctx, vcenterSession)
+	if err != nil {
+		ctx.Logger.Error(err, "could not reconcile vCenter version")
+	}
+
 	conditions.MarkTrue(ctx.VSphereCluster, infrav1.VCenterAvailableCondition)
 	ctx.VSphereCluster.Status.Ready = true
 
@@ -291,7 +299,7 @@ func (r clusterReconciler) reconcileIdentitySecret(ctx *context.ClusterContext) 
 	return nil
 }
 
-func (r clusterReconciler) reconcileVCenterConnectivity(ctx *context.ClusterContext) error {
+func (r clusterReconciler) reconcileVCenterConnectivity(ctx *context.ClusterContext) (*session.Session, error) {
 	params := session.NewParams().
 		WithServer(ctx.VSphereCluster.Spec.Server).
 		WithThumbprint(ctx.VSphereCluster.Spec.Thumbprint).
@@ -302,18 +310,24 @@ func (r clusterReconciler) reconcileVCenterConnectivity(ctx *context.ClusterCont
 	if ctx.VSphereCluster.Spec.IdentityRef != nil {
 		creds, err := identity.GetCredentials(ctx, r.Client, ctx.VSphereCluster, r.Namespace)
 		if err != nil {
-			return err
+			return nil, err
 		}
 
 		params = params.WithUserInfo(creds.Username, creds.Password)
-		_, err = session.GetOrCreate(ctx, params)
-		return err
+		return session.GetOrCreate(ctx, params)
 	}
 
 	params = params.WithUserInfo(ctx.Username, ctx.Password)
-	_, err := session.GetOrCreate(ctx,
-		params)
-	return err
+	return session.GetOrCreate(ctx, params)
+}
+
+func (r clusterReconciler) reconcileVCenterVersion(ctx *context.ClusterContext, s *session.Session) error {
+	version, err := s.GetVersion()
+	if err != nil {
+		return err
+	}
+	ctx.VSphereCluster.Status.VCenterVersion = version
+	return nil
 }
 
 func (r clusterReconciler) reconcileDeploymentZones(ctx *context.ClusterContext) (bool, error) {
@@ -356,6 +370,9 @@ func (r clusterReconciler) reconcileDeploymentZones(ctx *context.ClusterContext)
 		} else {
 			conditions.MarkTrue(ctx.VSphereCluster, infrav1.FailureDomainsAvailableCondition)
 		}
+	} else {
+		// Remove the condition if failure domains do not exist
+		conditions.Delete(ctx.VSphereCluster, infrav1.FailureDomainsAvailableCondition)
 	}
 	return true, nil
 }
@@ -384,7 +401,7 @@ func (r clusterReconciler) reconcileVSphereClusterWhenAPIServerIsOnline(ctx *con
 	go func() {
 		// Block until the target API server is online.
 		ctx.Logger.Info("start polling API server for online check")
-		wait.PollImmediateInfinite(time.Second*1, func() (bool, error) { return r.isAPIServerOnline(ctx), nil }) // nolint:errcheck
+		wait.PollImmediateInfinite(time.Second*1, func() (bool, error) { return r.isAPIServerOnline(ctx), nil }) //nolint:errcheck
 		ctx.Logger.Info("stop polling API server for online check")
 		ctx.Logger.Info("triggering GenericEvent", "reason", "api-server-online")
 		eventChannel := ctx.GetGenericEventChannelFor(ctx.VSphereCluster.GetObjectKind().GroupVersionKind())
@@ -396,7 +413,7 @@ func (r clusterReconciler) reconcileVSphereClusterWhenAPIServerIsOnline(ctx *con
 		// remove the key from the map that prevents multiple goroutines from
 		// polling the API server to see if it is online.
 		ctx.Logger.Info("start polling for control plane initialized")
-		wait.PollImmediateInfinite(time.Second*1, func() (bool, error) { return r.isControlPlaneInitialized(ctx), nil }) // nolint:errcheck
+		wait.PollImmediateInfinite(time.Second*1, func() (bool, error) { return r.isControlPlaneInitialized(ctx), nil }) //nolint:errcheck
 		ctx.Logger.Info("stop polling for control plane initialized")
 		apiServerTriggersMu.Lock()
 		delete(apiServerTriggers, ctx.Cluster.UID)

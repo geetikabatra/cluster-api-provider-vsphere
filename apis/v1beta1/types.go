@@ -52,6 +52,17 @@ const (
 	LinkedClone CloneMode = "linkedClone"
 )
 
+// OS is the type of Operating System the virtual machine uses.
+type OS string
+
+const (
+	// Linux indicates the VM uses a Linux Operating System.
+	Linux OS = "Linux"
+
+	// Windows indicates the VM uses Windows Server 2019 as the OS.
+	Windows OS = "Windows"
+)
+
 // VirtualMachineCloneSpec is information used to clone a virtual machine.
 type VirtualMachineCloneSpec struct {
 	// Template is the name or inventory path of the template used to clone
@@ -151,6 +162,14 @@ type VirtualMachineCloneSpec struct {
 	// must use URN-notation instead of display names.
 	// +optional
 	TagIDs []string `json:"tagIDs,omitempty"`
+	// PciDevices is the list of pci devices used by the virtual machine.
+	// +optional
+	PciDevices []PCIDeviceSpec `json:"pciDevices,omitempty"`
+
+	// OS is the Operating System of the virtual machine
+	// Defaults to Linux
+	// +optional
+	OS OS `json:"os,omitempty"`
 }
 
 // VSphereMachineTemplateResource describes the data needed to create a VSphereMachine from a template
@@ -192,6 +211,20 @@ func (v APIEndpoint) IsZero() bool {
 // String returns a formatted version HOST:PORT of this APIEndpoint.
 func (v APIEndpoint) String() string {
 	return fmt.Sprintf("%s:%d", v.Host, v.Port)
+}
+
+// PCIDeviceSpec defines virtual machine's PCI configuration
+type PCIDeviceSpec struct {
+	// DeviceID is the device ID of a virtual machine's PCI, in integer.
+	// Defaults to the eponymous property value in the template from which the
+	// virtual machine is cloned.
+	// +kubebuilder:validation:Required
+	DeviceID *int32 `json:"deviceId,omitempty"`
+	// VendorId is the vendor ID of a virtual machine's PCI, in integer.
+	// Defaults to the eponymous property value in the template from which the
+	// virtual machine is cloned.
+	// +kubebuilder:validation:Required
+	VendorID *int32 `json:"vendorId,omitempty"`
 }
 
 // NetworkSpec defines the virtual machine's network configuration.

@@ -24,9 +24,14 @@ import (
 	"time"
 
 	"github.com/pkg/errors"
+	apiv1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	apitypes "k8s.io/apimachinery/pkg/types"
+	"k8s.io/utils/pointer"
 	clusterv1 "sigs.k8s.io/cluster-api/api/v1beta1"
+	"sigs.k8s.io/cluster-api/controllers/remote"
+	controlplanev1 "sigs.k8s.io/cluster-api/controlplane/kubeadm/api/v1beta1"
 	clusterutilv1 "sigs.k8s.io/cluster-api/util"
 	"sigs.k8s.io/cluster-api/util/annotations"
 	"sigs.k8s.io/cluster-api/util/conditions"
@@ -54,7 +59,10 @@ import (
 
 // +kubebuilder:rbac:groups=infrastructure.cluster.x-k8s.io,resources=vspherevms,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=infrastructure.cluster.x-k8s.io,resources=vspherevms/status,verbs=get;update;patch
+// +kubebuilder:rbac:groups=cluster.x-k8s.io,resources=machinedeployments;machinesets,verbs=get;list;watch
+// +kubebuilder:rbac:groups=controlplane.cluster.x-k8s.io,resources=kubeadmcontrolplanes,verbs=get;list;watch
 // +kubebuilder:rbac:groups="",resources=events,verbs=get;list;watch;create;update;patch
+// +kubebuilder:rbac:groups=core,resources=nodes,verbs=get;list;delete
 
 // AddVMControllerToManager adds the VM controller to the provided manager.
 //nolint:forcetypeassert
@@ -75,7 +83,10 @@ func AddVMControllerToManager(ctx *context.ControllerManagerContext, mgr manager
 		Recorder:                 record.New(mgr.GetEventRecorderFor(controllerNameLong)),
 		Logger:                   ctx.Logger.WithName(controllerNameShort),
 	}
-	r := vmReconciler{ControllerContext: controllerContext}
+	r := vmReconciler{
+		ControllerContext: controllerContext,
+		VMService:         &govmomi.VMService{},
+	}
 	controller, err := ctrl.NewControllerManagedBy(mgr).
 		// Watch the controlled, infrastructure resource.
 		For(controlledType).
@@ -118,6 +129,8 @@ func AddVMControllerToManager(ctx *context.ControllerManagerContext, mgr manager
 
 type vmReconciler struct {
 	*context.ControllerContext
+
+	VMService services.VirtualMachineService
 }
 
 // Reconcile ensures the back-end state reflects the Kubernetes resource state intent.
@@ -161,6 +174,12 @@ func (r vmReconciler) Reconcile(ctx goctx.Context, req ctrl.Request) (_ ctrl.Res
 		return reconcile.Result{}, nil
 	}
 
+	vsphereCluster, err := util.GetVSphereClusterFromVSphereMachine(r, r.Client, vsphereMachine)
+	if err != nil || vsphereCluster == nil {
+		r.Logger.Info("VSphereCluster not found, won't reconcile", "key", ctrlclient.ObjectKeyFromObject(vsphereMachine))
+		return reconcile.Result{}, nil
+	}
+
 	// Fetch the CAPI Machine.
 	machine, err := clusterutilv1.GetOwnerMachine(r, r.Client, vsphereMachine.ObjectMeta)
 	if err != nil {
@@ -169,6 +188,11 @@ func (r vmReconciler) Reconcile(ctx goctx.Context, req ctrl.Request) (_ ctrl.Res
 	if machine == nil {
 		r.Logger.Info("Waiting for OwnerRef to be set on VSphereMachine", "key", vsphereMachine.Name)
 		return reconcile.Result{}, nil
+	}
+
+	clusterModule, err := r.fetchClusterModuleInfo(vsphereCluster, machine)
+	if err != nil {
+		return reconcile.Result{}, err
 	}
 
 	var vsphereFailureDomain *infrav1.VSphereFailureDomain
@@ -187,6 +211,7 @@ func (r vmReconciler) Reconcile(ctx goctx.Context, req ctrl.Request) (_ ctrl.Res
 	// Create the VM context for this request.
 	vmContext := &context.VMContext{
 		ControllerContext:    r.ControllerContext,
+		ClusterModuleInfo:    pointer.String(clusterModule),
 		VSphereVM:            vsphereVM,
 		VSphereFailureDomain: vsphereFailureDomain,
 		Session:              authSession,
@@ -245,11 +270,8 @@ func (r vmReconciler) Reconcile(ctx goctx.Context, req ctrl.Request) (_ ctrl.Res
 func (r vmReconciler) reconcileDelete(ctx *context.VMContext) (reconcile.Result, error) {
 	ctx.Logger.Info("Handling deleted VSphereVM")
 
-	// TODO(akutz) Implement selection of VM service based on vSphere version
-	var vmService services.VirtualMachineService = &govmomi.VMService{}
-
 	conditions.MarkFalse(ctx.VSphereVM, infrav1.VMProvisionedCondition, clusterv1.DeletingReason, clusterv1.ConditionSeverityInfo, "")
-	vm, err := vmService.DestroyVM(ctx)
+	vm, err := r.VMService.DestroyVM(ctx)
 	if err != nil {
 		conditions.MarkFalse(ctx.VSphereVM, infrav1.VMProvisionedCondition, "DeletionFailed", clusterv1.ConditionSeverityWarning, err.Error())
 		return reconcile.Result{}, errors.Wrapf(err, "failed to destroy VM")
@@ -261,10 +283,43 @@ func (r vmReconciler) reconcileDelete(ctx *context.VMContext) (reconcile.Result,
 		return reconcile.Result{}, nil
 	}
 
+	// Attempt to delete the node corresponding to the vsphere VM
+	err = r.deleteNode(ctx, vm.Name)
+	if err != nil {
+		r.Logger.V(6).Info("unable to delete node", "err", err)
+	}
+
 	// The VM is deleted so remove the finalizer.
 	ctrlutil.RemoveFinalizer(ctx.VSphereVM, infrav1.VMFinalizer)
 
 	return reconcile.Result{}, nil
+}
+
+// deleteNode attempts to find and best effort delete the node corresponding to the VM
+// This is necessary since CAPI does not the nodeRef field on the owner Machine object
+// until the node moves to Ready state. Hence, on Machine deletion it is unable to delete
+// the kubernetes node corresponding to the VM.
+func (r vmReconciler) deleteNode(ctx *context.VMContext, name string) error {
+	// Fetching the cluster object from the VSphereVM object to create a remote client to the cluster
+	cluster, err := clusterutilv1.GetClusterFromMetadata(r.ControllerContext, r.Client, ctx.VSphereVM.ObjectMeta)
+	if err != nil {
+		return err
+	}
+	clusterClient, err := remote.NewClusterClient(ctx, r.ControllerContext.Name, r.Client, ctrlclient.ObjectKeyFromObject(cluster))
+	if err != nil {
+		return err
+	}
+
+	// Attempt to delete the corresponding node
+	node := &apiv1.Node{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: name,
+		},
+	}
+	if err := clusterClient.Delete(ctx, node); err != nil {
+		return err
+	}
+	return nil
 }
 
 func (r vmReconciler) reconcileNormal(ctx *context.VMContext) (reconcile.Result, error) {
@@ -275,9 +330,6 @@ func (r vmReconciler) reconcileNormal(ctx *context.VMContext) (reconcile.Result,
 	// If the VSphereVM doesn't have our finalizer, add it.
 	ctrlutil.AddFinalizer(ctx.VSphereVM, infrav1.VMFinalizer)
 
-	// TODO(akutz) Implement selection of VM service based on vSphere version
-	var vmService services.VirtualMachineService = &govmomi.VMService{}
-
 	if r.isWaitingForStaticIPAllocation(ctx) {
 		conditions.MarkFalse(ctx.VSphereVM, infrav1.VMProvisionedCondition, infrav1.WaitingForStaticIPAllocationReason, clusterv1.ConditionSeverityInfo, "")
 		ctx.Logger.Info("vm is waiting for static ip to be available")
@@ -285,7 +337,7 @@ func (r vmReconciler) reconcileNormal(ctx *context.VMContext) (reconcile.Result,
 	}
 
 	// Get or create the VM.
-	vm, err := vmService.ReconcileVM(ctx)
+	vm, err := r.VMService.ReconcileVM(ctx)
 	if err != nil {
 		return reconcile.Result{}, errors.Wrapf(err, "failed to reconcile VM")
 	}
@@ -314,6 +366,7 @@ func (r vmReconciler) reconcileNormal(ctx *context.VMContext) (reconcile.Result,
 
 	// we didn't get any addresses, requeue
 	if len(ctx.VSphereVM.Status.Addresses) == 0 {
+		conditions.MarkFalse(ctx.VSphereVM, infrav1.VMProvisionedCondition, infrav1.WaitingForIPAllocationReason, clusterv1.ConditionSeverityInfo, "")
 		return reconcile.Result{RequeueAfter: 10 * time.Second}, nil
 	}
 
@@ -350,7 +403,7 @@ func (r vmReconciler) reconcileNetwork(ctx *context.VMContext, vm infrav1.Virtua
 	ctx.VSphereVM.Status.Addresses = ipAddrs
 }
 
-func (r *vmReconciler) clusterToVSphereVMs(a ctrlclient.Object) []reconcile.Request {
+func (r vmReconciler) clusterToVSphereVMs(a ctrlclient.Object) []reconcile.Request {
 	requests := []reconcile.Request{}
 	vms := &infrav1.VSphereVMList{}
 	err := r.Client.List(goctx.Background(), vms, ctrlclient.MatchingLabels(
@@ -373,7 +426,7 @@ func (r *vmReconciler) clusterToVSphereVMs(a ctrlclient.Object) []reconcile.Requ
 	return requests
 }
 
-func (r *vmReconciler) retrieveVcenterSession(ctx goctx.Context, vsphereVM *infrav1.VSphereVM) (*session.Session, error) {
+func (r vmReconciler) retrieveVcenterSession(ctx goctx.Context, vsphereVM *infrav1.VSphereVM) (*session.Session, error) {
 	// Get cluster object and then get VSphereCluster object
 
 	params := session.NewParams().
@@ -416,4 +469,80 @@ func (r *vmReconciler) retrieveVcenterSession(ctx goctx.Context, vsphereVM *infr
 	// Fallback to using credentials provided to the manager
 	return session.GetOrCreate(r.Context,
 		params)
+}
+
+func (r vmReconciler) fetchClusterModuleInfo(vsphereCluster *infrav1.VSphereCluster, machine *clusterv1.Machine) (string, error) {
+	var (
+		owner ctrlclient.Object
+		err   error
+	)
+
+	// TODO (srm09): Figure out a way to find the latest version of the CRD
+	if util.IsControlPlaneMachine(machine) {
+		owner, err = r.fetchControlPlaneOwnerObject(machine)
+	} else {
+		owner, err = r.fetchMachineDeploymentOwnerObject(machine)
+	}
+	if err != nil {
+		// If the owner objects cannot be traced, we can assume that the objects
+		// have been deleted in which case we do not want cluster module info populated
+		if apierrors.IsNotFound(err) {
+			return "", nil
+		}
+		return "", err
+	}
+
+	for _, mod := range vsphereCluster.Spec.ClusterModules {
+		if mod.TargetObjectName == owner.GetName() {
+			r.Logger.Info("cluster module with UUID found", "moduleUUID", mod.ModuleUUID)
+			return mod.ModuleUUID, nil
+		}
+	}
+	r.Logger.V(4).Info("no cluster module found")
+	return "", nil
+}
+
+func (r vmReconciler) fetchControlPlaneOwnerObject(machine *clusterv1.Machine) (ctrlclient.Object, error) {
+	gvk := controlplanev1.GroupVersion
+	kcp := &controlplanev1.KubeadmControlPlane{}
+	if err := r.fetchOwnerOfKindInto(gvk.String(), "KubeadmControlPlane", machine, kcp); err != nil {
+		return nil, err
+	}
+	return kcp, nil
+}
+
+func (r vmReconciler) fetchMachineDeploymentOwnerObject(machine *clusterv1.Machine) (ctrlclient.Object, error) {
+	gvk := clusterv1.GroupVersion
+
+	ms := &clusterv1.MachineSet{}
+	if err := r.fetchOwnerOfKindInto(gvk.String(), "MachineSet", machine, ms); err != nil {
+		return nil, err
+	}
+
+	md := &clusterv1.MachineDeployment{}
+	if err := r.fetchOwnerOfKindInto(gvk.String(), "MachineDeployment", ms, md); err != nil {
+		return nil, err
+	}
+	return md, nil
+}
+
+func (r vmReconciler) fetchOwnerOfKindInto(gvk, kind string, fromObject ctrlclient.Object, intoObj ctrlclient.Object) error {
+	ref, err := findOwnerRefWithKind(fromObject.GetOwnerReferences(), gvk, kind)
+	if err != nil {
+		return err
+	}
+
+	return r.Client.Get(r, ctrlclient.ObjectKey{
+		Namespace: fromObject.GetNamespace(),
+		Name:      ref.Name,
+	}, intoObj)
+}
+
+func findOwnerRefWithKind(ownerRefs []metav1.OwnerReference, gvk, kind string) (*metav1.OwnerReference, error) {
+	for _, ref := range ownerRefs {
+		if ref.APIVersion == gvk && ref.Kind == kind {
+			return &ref, nil
+		}
+	}
+	return nil, errors.Errorf("unable to find owner reference with APIVersion %s and Kind %s", gvk, kind)
 }

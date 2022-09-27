@@ -36,16 +36,20 @@ import (
 	"sigs.k8s.io/cluster-api/util/patch"
 	"sigs.k8s.io/cluster-api/util/predicates"
 	ctrl "sigs.k8s.io/controller-runtime"
+	ctrlbldr "sigs.k8s.io/controller-runtime/pkg/builder"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller"
 	ctrlutil "sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
+	"sigs.k8s.io/controller-runtime/pkg/event"
 	"sigs.k8s.io/controller-runtime/pkg/handler"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
+	"sigs.k8s.io/controller-runtime/pkg/predicate"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 	"sigs.k8s.io/controller-runtime/pkg/source"
 
 	infrav1 "sigs.k8s.io/cluster-api-provider-vsphere/apis/v1beta1"
 	vmwarev1 "sigs.k8s.io/cluster-api-provider-vsphere/apis/vmware/v1beta1"
+	"sigs.k8s.io/cluster-api-provider-vsphere/pkg/constants"
 	"sigs.k8s.io/cluster-api-provider-vsphere/pkg/context"
 	"sigs.k8s.io/cluster-api-provider-vsphere/pkg/context/vmware"
 	inframanager "sigs.k8s.io/cluster-api-provider-vsphere/pkg/manager"
@@ -61,7 +65,8 @@ import (
 // +kubebuilder:rbac:groups=vmware.infrastructure.cluster.x-k8s.io,resources=vspheremachines/status,verbs=get;update;patch
 // +kubebuilder:rbac:groups=vmware.infrastructure.cluster.x-k8s.io,resources=vspheremachinetemplates,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=vmware.infrastructure.cluster.x-k8s.io,resources=vspheremachinetemplates/status,verbs=get;update;patch
-// +kubebuilder:rbac:groups=cluster.x-k8s.io,resources=machines;machines/status,verbs=get;list;watch
+// +kubebuilder:rbac:groups=cluster.x-k8s.io,resources=machines,verbs=get;list;watch;patch
+// +kubebuilder:rbac:groups=cluster.x-k8s.io,resources=machines/status,verbs=get;list;watch
 // +kubebuilder:rbac:groups=vmoperator.vmware.com,resources=virtualmachines,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=vmoperator.vmware.com,resources=virtualmachineimages;virtualmachineimages/status,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups="",resources=nodes;events;configmaps,verbs=get;list;watch;create;update;patch;delete
@@ -133,7 +138,17 @@ func AddMachineControllerToManager(ctx *context.ControllerManagerContext, mgr ma
 		r.networkProvider = networkProvider
 	} else {
 		// Watch any VSphereVM resources owned by the controlled type.
-		builder.Watches(&source.Kind{Type: &infrav1.VSphereVM{}}, &handler.EnqueueRequestForOwner{OwnerType: controlledType, IsController: false})
+		builder.Watches(
+			&source.Kind{Type: &infrav1.VSphereVM{}},
+			&handler.EnqueueRequestForOwner{OwnerType: controlledType, IsController: false},
+			ctrlbldr.WithPredicates(predicate.Funcs{
+				// ignore creation events since this controller is responsible for
+				// the creation of the type.
+				CreateFunc: func(e event.CreateEvent) bool {
+					return false
+				},
+			}),
+		)
 	}
 
 	c, err := builder.Build(r)
@@ -181,7 +196,7 @@ func (r machineReconciler) Reconcile(ctx goctx.Context, req ctrl.Request) (_ ctr
 		return reconcile.Result{}, err
 	}
 	if machine == nil {
-		r.Logger.V(2).Info("waiting on Machine controller to set OwnerRef on infra machine")
+		logger.V(2).Info("waiting on Machine controller to set OwnerRef on infra machine")
 		return reconcile.Result{}, nil
 	}
 
@@ -200,7 +215,7 @@ func (r machineReconciler) Reconcile(ctx goctx.Context, req ctrl.Request) (_ ctr
 		ControllerContext: r.ControllerContext,
 		Cluster:           cluster,
 		Machine:           machine,
-		Logger:            r.Logger.WithName(req.Namespace).WithName(req.Name),
+		Logger:            logger,
 		PatchHelper:       patchHelper,
 	})
 	// always patch the VSphereMachine object
@@ -231,9 +246,9 @@ func (r machineReconciler) Reconcile(ctx goctx.Context, req ctrl.Request) (_ ctr
 	}
 
 	// Fetch the VSphereCluster and update the machine context
-	machineContext, err = r.VMService.FetchVSphereCluster(r.Client, cluster, r.ControllerContext, machineContext)
+	machineContext, err = r.VMService.FetchVSphereCluster(r.Client, cluster, machineContext)
 	if err != nil {
-		r.Logger.Info("unable to retrieve VSphereCluster", "error", err)
+		logger.Info("unable to retrieve VSphereCluster", "error", err)
 		return reconcile.Result{}, nil
 	}
 
@@ -274,7 +289,7 @@ func (r machineReconciler) reconcileNormal(ctx context.MachineContext) (reconcil
 	// If the VSphereMachine doesn't have our finalizer, add it.
 	ctrlutil.AddFinalizer(ctx.GetVSphereMachine(), infrav1.MachineFinalizer)
 
-	// nolint:gocritic
+	//nolint:gocritic
 	if r.supervisorBased {
 		err := r.setVMModifiers(ctx)
 		if err != nil {
@@ -308,8 +323,39 @@ func (r machineReconciler) reconcileNormal(ctx context.MachineContext) (reconcil
 		return reconcile.Result{RequeueAfter: 10 * time.Second}, nil
 	}
 
+	// The machine is patched at the last stage before marking the VM as provisioned
+	// This makes sure that the VSphereMachine exists and is in a Running state
+	// before attempting to patch.
+	err = r.patchMachineLabelsWithHostInfo(ctx)
+	if err != nil {
+		r.Logger.Error(err, "failed to patch machine with host info label", "machine ", ctx.GetMachine().Name)
+		return reconcile.Result{}, err
+	}
+
 	conditions.MarkTrue(ctx.GetVSphereMachine(), infrav1.VMProvisionedCondition)
 	return reconcile.Result{}, nil
+}
+
+// patchMachineLabelsWithHostInfo adds the ESXi host information as a label to the Machine object.
+// The ESXi host information is added with the CAPI node label prefix
+// which would be added onto the node by the CAPI controllers.
+func (r *machineReconciler) patchMachineLabelsWithHostInfo(ctx context.MachineContext) error {
+	hostInfo, err := r.VMService.GetHostInfo(ctx)
+	if err != nil {
+		return err
+	}
+
+	machine := ctx.GetMachine()
+	patchHelper, err := patch.NewHelper(machine, r.Client)
+	if err != nil {
+		return err
+	}
+
+	labels := machine.GetLabels()
+	labels[constants.ESXiHostInfoLabel] = hostInfo
+	machine.Labels = labels
+
+	return patchHelper.Patch(r, machine)
 }
 
 func (r *machineReconciler) clusterToVSphereMachines(a client.Object) []reconcile.Request {
@@ -355,7 +401,7 @@ func (r *machineReconciler) setVMModifiers(c context.MachineContext) error {
 		// No need to check the type. We know this will be a VirtualMachine
 		vm, _ := obj.(*vmoprv1.VirtualMachine)
 		ctx.Logger.V(3).Info("Applying network config to VM", "vm-name", vm.Name)
-		err := r.networkProvider.ConfigureVirtualMachine(ctx.ClusterContext, vm)
+		err := r.networkProvider.ConfigureVirtualMachine(ctx.GetClusterContext(), vm)
 		if err != nil {
 			return nil, errors.Errorf("failed to configure machine network: %+v", err)
 		}

@@ -17,9 +17,10 @@ spec:
     spec:
       containers:
       - args:
-        - --enable-leader-election
+        - --leader-elect
         - --logtostderr
         - --v=4
+        - "--feature-gates=NodeLabeling=${EXP_NODE_LABELING:=false},NodeAntiAffinity=${EXP_NODE_ANTI_AFFINITY:=false}"
         image: gcr.io/cluster-api-provider-vsphere/release/manager:latest
         imagePullPolicy: IfNotPresent
         name: manager
@@ -39,3 +40,5 @@ spec:
       tolerations:
         - effect: NoSchedule
           key: node-role.kubernetes.io/master
+        - effect: NoSchedule
+          key: node-role.kubernetes.io/control-plane
