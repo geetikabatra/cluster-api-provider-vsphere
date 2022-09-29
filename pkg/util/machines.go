@@ -114,12 +114,24 @@ func IsControlPlaneMachine(machine metav1.Object) bool {
 // GetMachineMetadata returns the cloud-init metadata as a base-64 encoded
 // string for a given VSphereMachine.
 func GetMachineMetadata(hostname string, vsphereVM infrav1.VSphereVM, networkStatuses ...infrav1.NetworkStatus) ([]byte, error) {
+	return GetMachineMetadataWithIPAMState(hostname, vsphereVM, map[string]infrav1.NetworkDeviceSpec{}, networkStatuses...)
+}
+
+// GetMachineMetadataWithIPAMState the cloud-init metadata as a base-64 encoded
+// string for a given VSphereMachine.
+// IPAM state includes IP and Gateways that should be added to each device.
+func GetMachineMetadataWithIPAMState(hostname string, vsphereVM infrav1.VSphereVM, ipamState map[string]infrav1.NetworkDeviceSpec, networkStatuses ...infrav1.NetworkStatus) ([]byte, error) {
 	// Create a copy of the devices and add their MAC addresses from a network status.
 	devices := make([]infrav1.NetworkDeviceSpec, integer.IntMax(len(vsphereVM.Spec.Network.Devices), len(networkStatuses)))
 
 	var waitForIPv4, waitForIPv6 bool
 	for i := range vsphereVM.Spec.Network.Devices {
 		vsphereVM.Spec.Network.Devices[i].DeepCopyInto(&devices[i])
+		if state, ok := ipamState[devices[i].MACAddr]; ok {
+			devices[i].IPAddrs = append(devices[i].IPAddrs, state.IPAddrs...)
+			devices[i].Gateway4 = state.Gateway4
+			devices[i].Gateway6 = state.Gateway6
+		}
 
 		if waitForIPv4 && waitForIPv6 {
 			// break early as we already wait for ipv4 and ipv6
